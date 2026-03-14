@@ -339,7 +339,7 @@ export default function Prescriptions() {
 
                   {/* Medications */}
                   <div className="space-y-2 mb-4">
-                    {rx.medications.map((med, i) => (
+                    {(rx.medications ?? []).map((med, i) => (
                       <div key={i} className="bg-gray-50 rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1">
                         <span className="font-semibold text-gray-900 text-sm">{med.name}</span>
                         <span className="text-xs text-gray-600">{med.dosage}</span>

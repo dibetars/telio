@@ -678,7 +678,7 @@ export default function OrgDashboard() {
                         </div>
                       </div>
                       <div className="space-y-1.5">
-                        {rx.medications.map((med, i) => (
+                        {(rx.medications ?? []).map((med, i) => (
                           <div key={i} className="bg-gray-50 rounded-lg px-3 py-2 flex flex-wrap gap-x-3 gap-y-0.5">
                             <span className="text-sm font-medium text-gray-900">{med.name}</span>
                             <span className="text-xs text-gray-500">{med.dosage} · {med.frequency} · {med.duration}</span>
