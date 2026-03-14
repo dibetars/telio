@@ -23,6 +23,7 @@ import Conversation from './pages/Conversation'
 import MedicalRecords from './pages/MedicalRecords'
 import Availability from './pages/Availability'
 import Profile from './pages/Profile'
+import Prescriptions from './pages/Prescriptions'
 import AdminDashboard from './pages/AdminDashboard'
 
 /** Reads ?tour=1 from the URL and auto-starts the tour after auth resolves */
@@ -73,6 +74,9 @@ export default function App() {
         <Route path="/doctors" element={<ProtectedRoute allowedRoles={['patient']}><Doctors /></ProtectedRoute>} />
         <Route path="/doctors/:id" element={<ProtectedRoute allowedRoles={['patient']}><DoctorProfile /></ProtectedRoute>} />
         <Route path="/medical-records" element={<ProtectedRoute allowedRoles={['patient']}><MedicalRecords /></ProtectedRoute>} />
+
+        {/* Prescriptions — patient, provider, organization */}
+        <Route path="/prescriptions" element={<ProtectedRoute allowedRoles={['patient', 'provider', 'organization']}><Prescriptions /></ProtectedRoute>} />
 
         {/* Provider-only */}
         <Route path="/availability" element={<ProtectedRoute allowedRoles={['provider']}><Availability /></ProtectedRoute>} />

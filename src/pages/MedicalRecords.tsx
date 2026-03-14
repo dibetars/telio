@@ -198,8 +198,11 @@ export default function MedicalRecords() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">{record.file_name || 'Unnamed record'}</p>
-                      <div className="flex items-center gap-3 mt-0.5">
+                      <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                         <span className="text-xs bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full">{record.record_type}</span>
+                        {record.uploaded_by && record.uploaded_by !== user?.id && (
+                          <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full">From Doctor</span>
+                        )}
                         <span className="text-xs text-gray-400">{formatDate(record.created_at)}</span>
                       </div>
                       {record.description && (

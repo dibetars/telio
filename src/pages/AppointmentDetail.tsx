@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
@@ -7,6 +7,7 @@ import { Appointment } from '../types'
 import {
   ArrowLeft, Calendar, Clock, Video, Phone, AlertCircle,
   CheckCircle, XCircle, MessageSquare, FileText,
+  Upload, Pill, File, Image, FileCheck, X, Loader2,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -17,6 +18,20 @@ const STATUS_CONFIG = {
   cancelled: { label: 'Cancelled', icon: <XCircle className="h-4 w-4" />, color: 'bg-red-100 text-red-700' },
 }
 
+const RECORD_TYPES = [
+  'Lab Results', 'Imaging Report', 'Doctor Notes',
+  'Vaccination Record', 'Surgery Record', 'Other',
+]
+
+function fileIcon(name?: string) {
+  if (!name) return <File className="h-5 w-5 text-gray-400" />
+  const ext = name.split('.').pop()?.toLowerCase()
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || ''))
+    return <Image className="h-5 w-5 text-brand-500" />
+  if (ext === 'pdf') return <FileCheck className="h-5 w-5 text-red-500" />
+  return <FileText className="h-5 w-5 text-gray-400" />
+}
+
 export default function AppointmentDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -25,6 +40,14 @@ export default function AppointmentDetail() {
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState(false)
   const [confirming, setConfirming] = useState(false)
+
+  // Upload doc modal
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadType, setUploadType] = useState(RECORD_TYPES[0])
+  const [uploadDesc, setUploadDesc] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (id) fetchAppointment(id)
@@ -70,6 +93,45 @@ export default function AppointmentDetail() {
       setAppointment({ ...appointment, status: 'confirmed' })
     } finally {
       setConfirming(false)
+    }
+  }
+
+  const handleUpload = async () => {
+    if (!user || !uploadFile || !appointment) return
+    setUploading(true)
+    try {
+      const patientId = appointment.patient_id
+      const ext = uploadFile.name.split('.').pop()
+      const path = `${patientId}/${Date.now()}.${ext}`
+
+      let fileUrl: string | null = null
+      const { error: storageErr } = await supabase.storage
+        .from('medical-records')
+        .upload(path, uploadFile)
+
+      if (!storageErr) {
+        const { data: urlData } = supabase.storage.from('medical-records').getPublicUrl(path)
+        fileUrl = urlData?.publicUrl ?? null
+      }
+
+      const { error: dbError } = await supabase.from('medical_records').insert({
+        patient_id: patientId,
+        record_type: uploadType,
+        description: uploadDesc || null,
+        file_name: uploadFile.name,
+        file_url: fileUrl,
+        uploaded_by: user.id,
+      })
+      if (dbError) throw dbError
+
+      setShowUpload(false)
+      setUploadFile(null)
+      setUploadDesc('')
+      alert('Document uploaded to patient\'s medical records.')
+    } catch (err: any) {
+      alert('Upload failed: ' + err.message)
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -214,6 +276,28 @@ export default function AppointmentDetail() {
                 Message
               </button>
 
+              {/* Provider actions */}
+              {isProvider && (
+                <>
+                  <button
+                    onClick={() => setShowUpload(true)}
+                    className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Upload for Patient
+                  </button>
+                  {appointment.status === 'completed' && (
+                    <button
+                      onClick={() => navigate(`/prescriptions?patient=${appointment.patient_id}&appointment=${appointment.id}`)}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+                    >
+                      <Pill className="h-4 w-4" />
+                      Write Prescription
+                    </button>
+                  )}
+                </>
+              )}
+
               {(appointment.status === 'scheduled' || appointment.status === 'confirmed') && (
                 <button
                   onClick={handleCancel}
@@ -228,6 +312,99 @@ export default function AppointmentDetail() {
           </div>
         </div>
       </div>
+
+      {/* Upload Document Modal */}
+      {showUpload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Upload for Patient</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  This will be added to {patientName}'s medical records.
+                </p>
+              </div>
+              <button onClick={() => { setShowUpload(false); setUploadFile(null); setUploadDesc('') }}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Record Type</label>
+                <select
+                  value={uploadType}
+                  onChange={(e) => setUploadType(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                >
+                  {RECORD_TYPES.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">File</label>
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className={cn(
+                    'border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-colors',
+                    uploadFile ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400'
+                  )}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                    className="hidden"
+                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                  />
+                  {uploadFile ? (
+                    <div className="flex items-center justify-center gap-2">
+                      {fileIcon(uploadFile.name)}
+                      <span className="text-sm font-medium text-gray-900">{uploadFile.name}</span>
+                    </div>
+                  ) : (
+                    <div>
+                      <Upload className="h-8 w-8 text-gray-300 mx-auto mb-1" />
+                      <p className="text-sm text-gray-500">Click to select a file</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={uploadDesc}
+                  onChange={(e) => setUploadDesc(e.target.value)}
+                  placeholder="e.g. Blood test results from visit"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowUpload(false); setUploadFile(null); setUploadDesc('') }}
+                className="flex-1 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpload}
+                disabled={!uploadFile || uploading}
+                className="flex-1 py-2.5 bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+              >
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {uploading ? 'Uploading…' : 'Upload'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   )
 }

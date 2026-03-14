@@ -17,6 +17,7 @@ import {
   X,
   Bell,
   ShieldCheck,
+  Pill,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Message } from '../types'
@@ -39,6 +40,7 @@ const navItems: NavItem[] = [
   { label: 'Appointments', path: '/appointments', icon: <Calendar className="h-5 w-5" /> },
   { label: 'Messages', path: '/messages', icon: <MessageSquare className="h-5 w-5" /> },
   { label: 'Medical Records', path: '/medical-records', icon: <FileText className="h-5 w-5" />, roles: ['patient'] },
+  { label: 'Prescriptions', path: '/prescriptions', icon: <Pill className="h-5 w-5" />, roles: ['patient', 'provider', 'organization'] },
   { label: 'Availability', path: '/availability', icon: <Clock className="h-5 w-5" />, roles: ['provider'] },
   { label: 'Manage Doctors', path: '/dashboard?tab=doctors', icon: <Users className="h-5 w-5" />, roles: ['organization'] },
   { label: 'Health Dashboard', path: '/admin', icon: <ShieldCheck className="h-5 w-5" />, roles: ['admin'] },

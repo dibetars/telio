@@ -114,12 +114,21 @@ export interface Review {
 
 export interface Prescription {
   id: string
-  consultation_id: string
+  consultation_id?: string
+  appointment_id?: string
   patient_id: string
   provider_id: string
   medications: Medication[]
   instructions?: string
+  status: 'active' | 'sent_to_pharmacy' | 'dispensed' | 'expired' | 'cancelled'
+  pharmacy_id?: string
   issued_at: string
+  dispensed_at?: string
+  created_at: string
+  // Joined
+  patient?: User
+  provider?: Provider & { users?: User }
+  pharmacy?: Organization
 }
 
 export interface Medication {
@@ -132,10 +141,13 @@ export interface Medication {
 
 // ─── Organization ─────────────────────────────────────────────────────────────
 
+export type OrganizationType = 'hospital' | 'clinic' | 'pharmacy' | 'lab' | 'other'
+
 export interface Organization {
   id: string
   user_id: string
   name: string
+  organization_type?: OrganizationType
   description?: string
   address?: string
   phone?: string

@@ -2,16 +2,24 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
-import { Organization, OrgProviderDetail, Appointment } from '../types'
+import { Organization, OrgProviderDetail, Appointment, Prescription } from '../types'
 import {
   Building2, Users, Calendar, BarChart3,
   Plus, Trash2, Search, CheckCircle2, Clock,
-  Stethoscope, UserCheck, TrendingUp, Mail,
-  ChevronRight, Loader2, X,
+  Stethoscope, UserCheck, Mail,
+  ChevronRight, Loader2, X, Pill, BadgeCheck,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
-type Tab = 'overview' | 'doctors' | 'patients' | 'appointments'
+type Tab = 'overview' | 'doctors' | 'patients' | 'appointments' | 'prescriptions'
+
+const ORG_TYPE_LABELS: Record<string, string> = {
+  hospital: 'Hospital',
+  clinic: 'Clinic',
+  pharmacy: 'Pharmacy',
+  lab: 'Laboratory',
+  other: 'Healthcare Organization',
+}
 
 interface Patient { id: string; name: string; email: string; appointmentCount: number }
 
@@ -39,6 +47,9 @@ export default function OrgDashboard() {
   const [patientSearch, setPatientSearch] = useState('')
   const [apptSearch, setApptSearch] = useState('')
   const [apptFilter, setApptFilter] = useState<'all' | 'upcoming' | 'past'>('all')
+
+  // Pharmacy
+  const [rxList, setRxList] = useState<Prescription[]>([])
 
   useEffect(() => {
     if (user) fetchAll()
@@ -69,6 +80,20 @@ export default function OrgDashboard() {
         .eq('org_id', orgData.id)
       const docs = (docData || []) as OrgProviderDetail[]
       setDoctors(docs)
+
+      // 2b. If pharmacy, load incoming prescriptions
+      if (orgData.organization_type === 'pharmacy') {
+        const { data: rxData } = await supabase
+          .from('prescriptions')
+          .select(`
+            *,
+            patient:users!patient_id(name, email),
+            provider:providers!provider_id(specialty, users:users!user_id(name))
+          `)
+          .eq('pharmacy_id', orgData.id)
+          .order('created_at', { ascending: false })
+        setRxList((rxData as unknown as Prescription[]) ?? [])
+      }
 
       // 3. Appointments for all org providers (flat — no joins)
       const providerIds = docs.map((d) => d.provider_id)
@@ -222,11 +247,22 @@ export default function OrgDashboard() {
     p.email.toLowerCase().includes(patientSearch.toLowerCase())
   )
 
+  const markDispensed = async (rxId: string) => {
+    await supabase
+      .from('prescriptions')
+      .update({ status: 'dispensed', dispensed_at: new Date().toISOString() })
+      .eq('id', rxId)
+    setRxList((prev) => prev.map((r) => r.id === rxId ? { ...r, status: 'dispensed' } : r))
+  }
+
+  const isPharmacy = org?.organization_type === 'pharmacy'
+
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: 'overview',      label: 'Overview',      icon: BarChart3 },
     { id: 'doctors',       label: 'Doctors',        icon: Stethoscope },
     { id: 'patients',      label: 'Patients',       icon: Users },
     { id: 'appointments',  label: 'Appointments',   icon: Calendar },
+    ...(isPharmacy ? [{ id: 'prescriptions' as Tab, label: 'Prescriptions', icon: Pill }] : []),
   ]
 
   return (
@@ -240,8 +276,15 @@ export default function OrgDashboard() {
               <Building2 className="h-7 w-7 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{org?.name || 'Organization'}</h1>
-              <p className="text-sm text-gray-500 mt-0.5">Healthcare Network Dashboard</p>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold text-gray-900">{org?.name || 'Organization'}</h1>
+                {org?.is_verified && (
+                  <BadgeCheck className="h-5 w-5 text-emerald-500 flex-shrink-0" />
+                )}
+              </div>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {org?.organization_type ? ORG_TYPE_LABELS[org.organization_type] : 'Healthcare Network'}
+              </p>
             </div>
           </div>
           {org && !org.is_verified && (
@@ -586,6 +629,73 @@ export default function OrgDashboard() {
             )}
           </div>
         )}
+        {/* ── Prescriptions (Pharmacy only) ────────── */}
+        {tab === 'prescriptions' && isPharmacy && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-gray-500">
+                {rxList.filter((r) => r.status === 'sent_to_pharmacy').length} pending · {rxList.filter((r) => r.status === 'dispensed').length} dispensed
+              </p>
+            </div>
+            {rxList.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+                <Pill className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="font-medium text-gray-900">No prescriptions yet</p>
+                <p className="text-sm text-gray-500 mt-1">Prescriptions sent to your pharmacy will appear here.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {rxList.map((rx) => {
+                  const patientName = (rx.patient as any)?.name
+                  const providerName = (rx.provider as any)?.users?.name
+                  const isPending = rx.status === 'sent_to_pharmacy'
+                  return (
+                    <div key={rx.id} className={cn('bg-white rounded-xl border p-4', isPending ? 'border-amber-200' : 'border-gray-200')}>
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                          <p className="font-semibold text-gray-900">{patientName}</p>
+                          <p className="text-xs text-gray-500">Prescribed by Dr. {providerName}</p>
+                          <p className="text-xs text-gray-400">
+                            {new Date(rx.issued_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {isPending && (
+                            <button
+                              onClick={() => markDispensed(rx.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Mark Dispensed
+                            </button>
+                          )}
+                          <span className={cn(
+                            'text-xs font-medium px-2 py-0.5 rounded-full',
+                            isPending ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                          )}>
+                            {isPending ? 'Pending' : 'Dispensed'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        {rx.medications.map((med, i) => (
+                          <div key={i} className="bg-gray-50 rounded-lg px-3 py-2 flex flex-wrap gap-x-3 gap-y-0.5">
+                            <span className="text-sm font-medium text-gray-900">{med.name}</span>
+                            <span className="text-xs text-gray-500">{med.dosage} · {med.frequency} · {med.duration}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {rx.instructions && (
+                        <p className="text-xs text-gray-500 mt-2 italic">{rx.instructions}</p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   )
