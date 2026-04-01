@@ -18,6 +18,8 @@ import {
   Bell,
   ShieldCheck,
   Pill,
+  Building2,
+  Database,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { Message } from '../types'
@@ -43,6 +45,8 @@ const navItems: NavItem[] = [
   { label: 'Prescriptions', path: '/prescriptions', icon: <Pill className="h-5 w-5" />, roles: ['patient', 'provider', 'organization'] },
   { label: 'Availability', path: '/availability', icon: <Clock className="h-5 w-5" />, roles: ['provider'] },
   { label: 'Manage Doctors', path: '/dashboard?tab=doctors', icon: <Users className="h-5 w-5" />, roles: ['organization'] },
+  { label: 'Hospital Records', path: '/hospital-records', icon: <Building2 className="h-5 w-5" />, roles: ['admin', 'organization', 'patient'] },
+  { label: 'ERP Connectors', path: '/erp-connectors', icon: <Database className="h-5 w-5" />, roles: ['admin', 'organization'] },
   { label: 'Health Dashboard', path: '/admin', icon: <ShieldCheck className="h-5 w-5" />, roles: ['admin'] },
 ]
 

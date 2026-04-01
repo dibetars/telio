@@ -171,3 +171,85 @@ export interface OrgProviderDetail {
   provider_email: string
   provider_phone?: string
 }
+
+// ─── ERP / Data Sovereignty ────────────────────────────────────────────────────
+
+export type ERPType =
+  | 'sap_healthcare'
+  | 'oracle_cerner'
+  | 'epic'
+  | 'meditech'
+  | 'allscripts'
+  | 'hl7_fhir'
+  | 'custom_csv'
+
+export type ERPSyncStatus = 'idle' | 'syncing' | 'success' | 'error'
+
+export interface ERPConnection {
+  id: string
+  organization_id?: string
+  name: string
+  erp_type: ERPType
+  endpoint_url?: string
+  auth_method?: 'api_key' | 'oauth' | 'basic' | 'none'
+  sync_schedule?: 'manual' | 'daily' | 'weekly'
+  last_sync_at?: string
+  sync_status: ERPSyncStatus
+  sync_error?: string
+  is_active: boolean
+  created_at: string
+  updated_at?: string
+  // Joined
+  organization?: Organization
+}
+
+export type HospitalRecordType =
+  | 'admission'
+  | 'discharge'
+  | 'lab_result'
+  | 'imaging'
+  | 'surgical'
+  | 'medication'
+  | 'vitals'
+  | 'diagnosis'
+  | 'referral'
+  | 'other'
+
+export type HospitalRecordSource = 'manual' | 'csv_import' | 'erp_sync' | 'hl7_fhir'
+
+export interface HospitalRecord {
+  id: string
+  patient_id: string
+  organization_id?: string
+  erp_connection_id?: string
+  erp_record_id?: string
+  record_type: HospitalRecordType
+  record_date?: string
+  title?: string
+  data: Record<string, unknown>
+  source: HospitalRecordSource
+  import_batch_id?: string
+  status: 'active' | 'archived' | 'pending_review'
+  created_at: string
+  updated_at?: string
+  // Joined
+  patient?: User
+  organization?: Organization
+  erp_connection?: ERPConnection
+}
+
+export interface ImportJob {
+  id: string
+  organization_id?: string
+  erp_connection_id?: string
+  file_name?: string
+  total_rows: number
+  processed_rows: number
+  success_rows: number
+  error_rows: number
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  errors: Array<{ row: number; message: string }>
+  created_by?: string
+  created_at: string
+  completed_at?: string
+}

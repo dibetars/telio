@@ -25,6 +25,8 @@ import Availability from './pages/Availability'
 import Profile from './pages/Profile'
 import Prescriptions from './pages/Prescriptions'
 import AdminDashboard from './pages/AdminDashboard'
+import ERPConnectors from './pages/ERPConnectors'
+import HospitalRecords from './pages/HospitalRecords'
 
 /** Reads ?tour=1 from the URL and auto-starts the tour after auth resolves */
 function TourAutoStart() {
@@ -83,6 +85,10 @@ export default function App() {
 
         {/* Admin-only */}
         <Route path="/admin" element={<ProtectedRoute allowedRoles={['admin']}><AdminDashboard /></ProtectedRoute>} />
+
+                {/* ERP Routes */}
+        <Route path="/erp-connectors" element={<ProtectedRoute allowedRoles={["admin","organization"]}><ERPConnectors /></ProtectedRoute>} />
+        <Route path="/hospital-records" element={<ProtectedRoute allowedRoles={["admin","organization","patient"]}><HospitalRecords /></ProtectedRoute>} />
 
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
