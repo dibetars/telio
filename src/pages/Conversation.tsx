@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import Layout from '../components/Layout'
 import { Message } from '../types'
-import { ArrowLeft, Send, Paperclip, Loader2 } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Wifi, WifiOff } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 export default function Conversation() {
@@ -17,65 +17,86 @@ export default function Conversation() {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [connected, setConnected] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  const channelId = user && otherId
+    ? ['conv', ...([user.id, otherId].sort())].join('-')
+    : null
 
   useEffect(() => {
-    if (user && otherId) {
-      fetchMessages()
-      fetchOtherUser()
-      markAsRead()
+    if (!user || !otherId || !channelId) return
 
-      // Subscribe to new messages in this conversation (both directions)
-      const channel = supabase
-        .channel(`conversation-${[user.id, otherId].sort().join('-')}`)
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'messages' },
-          (payload) => {
-            const msg = payload.new as Message
-            const inThisConversation =
-              (msg.sender_id === otherId && msg.receiver_id === user.id) ||
-              (msg.sender_id === user.id && msg.receiver_id === otherId)
-            if (!inThisConversation) return
+    fetchMessages()
+    fetchOtherUser()
+    markAsRead()
 
-            // Deduplicate — sender already appended optimistically
-            setMessages((prev) =>
-              prev.find((m) => m.id === msg.id) ? prev : [...prev, msg]
-            )
-            // Mark incoming messages as read immediately
-            if (msg.receiver_id === user.id) {
-              supabase.from('messages').update({ is_read: true }).eq('id', msg.id)
-            }
+    // ── Dual-layer real-time ──────────────────────────────────────────────
+    // Layer 1: Supabase Broadcast — instant delivery (no publication needed)
+    // Layer 2: postgres_changes — catches messages from other sessions/tabs
+    const channel = supabase
+      .channel(channelId)
+      // Broadcast: sender pushes message directly to channel after DB insert
+      .on('broadcast', { event: 'new_message' }, ({ payload }) => {
+        const msg = payload as Message
+        if (
+          (msg.sender_id === otherId && msg.receiver_id === user.id) ||
+          (msg.sender_id === user.id && msg.receiver_id === otherId)
+        ) {
+          setMessages((prev) =>
+            prev.find((m) => m.id === msg.id) ? prev : [...prev, msg]
+          )
+          if (msg.receiver_id === user.id) {
+            supabase.from('messages').update({ is_read: true }).eq('id', msg.id)
           }
-        )
-        .subscribe()
+        }
+      })
+      // postgres_changes: backup for cross-device / missed broadcasts
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const msg = payload.new as Message
+          const inThisConvo =
+            (msg.sender_id === otherId && msg.receiver_id === user.id) ||
+            (msg.sender_id === user.id && msg.receiver_id === otherId)
+          if (!inThisConvo) return
+          setMessages((prev) =>
+            prev.find((m) => m.id === msg.id) ? prev : [...prev, msg]
+          )
+          if (msg.receiver_id === user.id) {
+            supabase.from('messages').update({ is_read: true }).eq('id', msg.id)
+          }
+        }
+      )
+      .subscribe((status) => {
+        setConnected(status === 'SUBSCRIBED')
+      })
 
-      return () => { supabase.removeChannel(channel) }
+    channelRef.current = channel
+    return () => {
+      supabase.removeChannel(channel)
+      channelRef.current = null
     }
-  }, [user, otherId])
+  }, [user, otherId, channelId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   const fetchMessages = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .or(
-          `and(sender_id.eq.${user!.id},receiver_id.eq.${otherId}),` +
-          `and(sender_id.eq.${otherId},receiver_id.eq.${user!.id})`
-        )
-        .order('created_at', { ascending: true })
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .or(
+        `and(sender_id.eq.${user!.id},receiver_id.eq.${otherId}),` +
+        `and(sender_id.eq.${otherId},receiver_id.eq.${user!.id})`
+      )
+      .order('created_at', { ascending: true })
 
-      if (error) throw error
-      setMessages(data || [])
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
+    setMessages(data || [])
+    setLoading(false)
   }
 
   const fetchOtherUser = async () => {
@@ -84,10 +105,7 @@ export default function Conversation() {
       .select('name, role')
       .eq('id', otherId)
       .single()
-
-    if (data) {
-      setOtherName(data.role === 'provider' ? `Dr. ${data.name}` : data.name)
-    }
+    if (data) setOtherName(data.role === 'provider' ? `Dr. ${data.name}` : data.name)
   }
 
   const markAsRead = async () => {
@@ -119,9 +137,22 @@ export default function Conversation() {
         .single()
 
       if (error) throw error
+
+      // Optimistic add
       setMessages((prev) => [...prev, data])
-    } catch (err: any) {
-      setText(content) // restore on failure
+
+      // Broadcast 1: notify the conversation channel (other user sees message instantly)
+      if (channelRef.current) {
+        channelRef.current.send({ type: 'broadcast', event: 'new_message', payload: data })
+      }
+      // Broadcast 2: notify the receiver's inbox channel (updates their notification bell)
+      supabase.channel(`inbox-${otherId}`).send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: data,
+      })
+    } catch (err) {
+      setText(content)
       console.error(err)
     } finally {
       setSending(false)
@@ -168,8 +199,15 @@ export default function Conversation() {
               {otherName.charAt(0).toUpperCase()}
             </span>
           </div>
-          <div>
+          <div className="flex-1">
             <p className="font-semibold text-gray-900 text-sm">{otherName || '...'}</p>
+            <p className="text-xs text-gray-400">{connected ? 'Online' : 'Connecting...'}</p>
+          </div>
+          {/* Connection indicator */}
+          <div title={connected ? 'Connected' : 'Connecting...'}>
+            {connected
+              ? <Wifi className="h-4 w-4 text-green-500" />
+              : <WifiOff className="h-4 w-4 text-gray-400 animate-pulse" />}
           </div>
         </div>
 
@@ -208,7 +246,7 @@ export default function Conversation() {
                           </span>
                         </div>
                       )}
-                      <div className={cn('max-w-xs sm:max-w-sm lg:max-w-md')}>
+                      <div className="max-w-xs sm:max-w-sm lg:max-w-md">
                         <div
                           className={cn(
                             'px-4 py-2.5 rounded-2xl text-sm',
@@ -236,9 +274,6 @@ export default function Conversation() {
         {/* Input */}
         <div className="px-4 py-3 bg-white border-t border-gray-200">
           <div className="flex items-end gap-2">
-            <button className="p-2 text-gray-400 hover:text-gray-600 flex-shrink-0">
-              <Paperclip className="h-5 w-5" />
-            </button>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -256,7 +291,7 @@ export default function Conversation() {
               {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </button>
           </div>
-          <p className="text-xs text-gray-400 mt-1.5 ml-10">Press Enter to send, Shift+Enter for new line</p>
+          <p className="text-xs text-gray-400 mt-1.5">Press Enter to send · Shift+Enter for new line</p>
         </div>
       </div>
     </Layout>

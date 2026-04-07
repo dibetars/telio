@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import Layout from '../components/Layout'
-import { Message } from '../types'
 import { MessageSquare, Search, Circle } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -26,8 +25,8 @@ export default function Messages() {
     if (!user) return
     fetchThreads()
 
-    // Refresh thread list in real-time when any message involving this user arrives
-    const channel = supabase
+    // Layer 1: postgres_changes — catches all inserts (requires publication setup)
+    const pgChannel = supabase
       .channel(`messages-list-${user.id}`)
       .on(
         'postgres_changes',
@@ -41,7 +40,20 @@ export default function Messages() {
       )
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    // Layer 2: Broadcast — instant update when other user sends from Conversation page
+    // We listen on any conversation channel involving this user by subscribing to
+    // a presence room and re-fetching when a broadcast new_message arrives
+    const broadcastChannel = supabase
+      .channel(`inbox-${user.id}`)
+      .on('broadcast', { event: 'new_message' }, () => {
+        fetchThreads()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(pgChannel)
+      supabase.removeChannel(broadcastChannel)
+    }
   }, [user])
 
   const fetchThreads = async () => {
@@ -58,7 +70,6 @@ export default function Messages() {
 
       if (error) throw error
 
-      // Group by conversation partner
       const threadMap = new Map<string, Thread>()
       for (const msg of (data || []) as any[]) {
         const other = msg.sender_id === user!.id ? msg.receiver : msg.sender
@@ -73,8 +84,7 @@ export default function Messages() {
           })
         }
         if (msg.receiver_id === user!.id && !msg.is_read) {
-          const t = threadMap.get(other.id)!
-          t.unreadCount++
+          threadMap.get(other.id)!.unreadCount++
         }
       }
 

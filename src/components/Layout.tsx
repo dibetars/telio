@@ -93,33 +93,37 @@ export default function Layout({ children }: Props) {
 
     fetchUnread()
 
-    const channel = supabase
-      .channel(`notifications-${user.id}`)
+    // Layer 1: postgres_changes (requires messages in supabase_realtime publication)
+    const pgChannel = supabase
+      .channel(`notifications-pg-${user.id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
-          const msg = payload.new as Message
-          if (msg.receiver_id === user.id) {
-            // Re-fetch to get the joined sender name
-            fetchUnread()
-          }
-        }
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${user.id}` },
+        () => { fetchUnread() }
       )
-      // Also listen for messages being marked read elsewhere (e.g. in Conversation)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages' },
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `receiver_id=eq.${user.id}` },
         (payload) => {
           const msg = payload.new as Message
-          if (msg.receiver_id === user.id && msg.is_read) {
-            setUnread((prev) => prev.filter((m) => m.id !== msg.id))
-          }
+          if (msg.is_read) setUnread((prev) => prev.filter((m) => m.id !== msg.id))
         }
       )
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    // Layer 2: Broadcast — instant notification when sender is in Conversation page
+    const broadcastChannel = supabase
+      .channel(`inbox-${user.id}`)
+      .on('broadcast', { event: 'new_message' }, (payload) => {
+        const msg = payload.payload as Message
+        if (msg?.receiver_id === user.id) fetchUnread()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(pgChannel)
+      supabase.removeChannel(broadcastChannel)
+    }
   }, [user])
 
   const markAllRead = async () => {
